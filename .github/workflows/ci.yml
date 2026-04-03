@@ -1,0 +1,38 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        elixir: ['1.15', '1.16', '1.17']
+        otp: ['26', '27']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - run: mix dialyzer
+      - run: mix coveralls.json
+      - name: Coverage gate
+        run: |
+          COVERAGE=$(jq '.source_files | map(.coverage | map(select(. != null)) | [map(select(. > 0)) | length, length] | .[0] / .[1] * 100) | add / length' cover/excoveralls.json)
+          if (( $(echo "$COVERAGE < 95" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below 95% threshold"
+            exit 1
+          fi

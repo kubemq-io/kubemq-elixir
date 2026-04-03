@@ -1,0 +1,6 @@
+{
+  "skip_files": [
+    "lib/kubemq/transport/grpc.ex",
+    "lib/kubemq/proto/kubemq.pb.ex"
+  ]
+}
