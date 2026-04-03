@@ -1,0 +1,65 @@
+version: "2"
+mode: soak
+duration: 15m
+run_id: ""
+
+broker:
+  address: "localhost:50000"
+
+patterns:
+  events:
+    enabled: true
+    channels: 1
+    producers_per_channel: 1
+    consumers_per_channel: 1
+    rate: 10
+  events_store:
+    enabled: true
+    channels: 1
+    producers_per_channel: 1
+    consumers_per_channel: 1
+    rate: 10
+  queue_stream:
+    enabled: true
+    channels: 1
+    producers_per_channel: 1
+    consumers_per_channel: 1
+    rate: 10
+  queue_simple:
+    enabled: true
+    channels: 1
+    producers_per_channel: 1
+    consumers_per_channel: 1
+    rate: 10
+  commands:
+    enabled: true
+    channels: 1
+    senders_per_channel: 1
+    responders_per_channel: 1
+    rate: 10
+  queries:
+    enabled: true
+    channels: 1
+    senders_per_channel: 1
+    responders_per_channel: 1
+    rate: 10
+
+queue:
+  poll_max_messages: 10
+  poll_wait_timeout_seconds: 5
+  auto_ack: true
+
+rpc:
+  timeout_ms: 10000
+
+message:
+  size_bytes: 256
+
+thresholds:
+  max_duplication_pct: 1.0
+  max_error_rate_pct: 1.0
+  max_loss_pct: 1.0
+
+shutdown:
+  drain_timeout_seconds: 10
+  cleanup_channels: true
