@@ -1,5 +1,6 @@
 defmodule KubeMQ.ServerInfoTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.ServerInfo
 
   alias KubeMQ.ServerInfo
 

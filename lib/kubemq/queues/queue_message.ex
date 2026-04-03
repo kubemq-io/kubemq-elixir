@@ -5,6 +5,17 @@ defmodule KubeMQ.QueueMessage do
   Supports delivery policies (expiration, delay, dead-letter) and
   server-populated attributes on receive.
 
+  ## Fields
+
+    * `id` (`String.t() | nil`) — Unique message identifier. Auto-generated if nil.
+    * `channel` (`String.t()`) — Target queue channel name. Required for sending.
+    * `metadata` (`String.t() | nil`) — Optional metadata string.
+    * `body` (`binary() | nil`) — Message payload.
+    * `client_id` (`String.t() | nil`) — Sender identifier. Set automatically by `KubeMQ.Client`.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags. Default: `%{}`.
+    * `policy` (`KubeMQ.QueuePolicy.t() | nil`) — Delivery policy (expiration, delay, dead-letter).
+    * `attributes` (`KubeMQ.QueueAttributes.t() | nil`) — Server-populated attributes (present only on received messages).
+
   ## Usage
 
       msg = KubeMQ.QueueMessage.new(
@@ -27,6 +38,28 @@ defmodule KubeMQ.QueueMessage do
 
   defstruct [:id, :channel, :metadata, :body, :client_id, :policy, :attributes, tags: %{}]
 
+  @doc """
+  Create a new QueueMessage struct from keyword options.
+
+  ## Options
+
+    * `:id` — Message ID string (auto-generated if nil)
+    * `:channel` — Target queue channel name (required for sending)
+    * `:metadata` — Metadata string
+    * `:body` — Message payload (binary)
+    * `:client_id` — Client identifier (set automatically by `KubeMQ.Client`)
+    * `:tags` — Key-value tags map (default: `%{}`)
+    * `:policy` — `KubeMQ.QueuePolicy` struct for delivery policy
+    * `:attributes` — `KubeMQ.QueueAttributes` struct (server-populated on receive)
+
+  ## Examples
+
+      iex> msg = KubeMQ.QueueMessage.new(channel: "orders", body: "order-data")
+      iex> msg.channel
+      "orders"
+      iex> msg.tags
+      %{}
+  """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{

@@ -28,11 +28,20 @@ defmodule KubeMQ.EventStoreStreamHandle do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @doc """
+  Send a persistent event through the streaming handle and await confirmation.
+
+  Unlike `KubeMQ.EventStreamHandle.send/2`, this call waits for the server
+  to confirm persistence and returns `{:ok, %KubeMQ.EventStoreResult{}}`.
+  """
   @spec send(t(), EventStore.t()) :: {:ok, EventStoreResult.t()} | {:error, Error.t()}
   def send(handle, %EventStore{} = event) do
     GenServer.call(handle, {:send, event}, 30_000)
   end
 
+  @doc """
+  Close the event store stream handle, terminating the underlying gRPC stream.
+  """
   @spec close(t()) :: :ok
   def close(handle) do
     GenServer.stop(handle, :normal)

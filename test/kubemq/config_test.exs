@@ -1,5 +1,6 @@
 defmodule KubeMQ.ConfigTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.Config
 
   alias KubeMQ.Config
 

@@ -4,6 +4,27 @@
 [![CI](https://github.com/kubemq/kubemq-elixir/actions/workflows/ci.yml/badge.svg)](https://github.com/kubemq/kubemq-elixir/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Features](#features)
+  - [Events (Pub/Sub)](#events-pubsub)
+  - [Events Store (Persistent Pub/Sub)](#events-store-persistent-pubsub)
+  - [Commands (RPC)](#commands-rpc)
+  - [Queries (RPC with Cache)](#queries-rpc-with-cache)
+  - [Queues](#queues)
+  - [Channel Management](#channel-management)
+  - [Broadway Producers](#broadway-producers)
+- [Configuration](#configuration)
+- [Supervision](#supervision)
+- [Error Handling](#error-handling)
+- [TLS / mTLS](#tls--mtls)
+- [Examples](#examples)
+- [Documentation](#documentation)
+- [Requirements](#requirements)
+- [License](#license)
+
 Elixir client SDK for [KubeMQ](https://kubemq.io) — a Kubernetes-native message queue broker.
 
 ## Installation

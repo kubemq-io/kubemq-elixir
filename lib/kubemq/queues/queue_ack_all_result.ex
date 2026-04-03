@@ -1,6 +1,13 @@
 defmodule KubeMQ.QueueAckAllResult do
   @moduledoc """
   Result of acknowledging all messages in a queue.
+
+  ## Fields
+
+    * `request_id` (`String.t()`) — Request identifier.
+    * `affected_messages` (`non_neg_integer()`) — Number of messages that were acknowledged.
+    * `is_error` (`boolean()`) — Whether the operation failed.
+    * `error` (`String.t() | nil`) — Error message if `is_error` is true.
   """
 
   @type t :: %__MODULE__{

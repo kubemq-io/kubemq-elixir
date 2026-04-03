@@ -1,6 +1,17 @@
 defmodule KubeMQ.QueryResponse do
   @moduledoc """
   Response received after sending a query via `KubeMQ.Client.send_query/2`.
+
+  ## Fields
+
+    * `query_id` (`String.t()`) — ID of the query that was executed.
+    * `executed` (`boolean()`) — Whether the query was executed successfully.
+    * `executed_at` (`integer()`) — Unix timestamp when the query was executed.
+    * `metadata` (`String.t() | nil`) — Response metadata from the responder.
+    * `body` (`binary() | nil`) — Response payload from the responder.
+    * `cache_hit` (`boolean()`) — Whether the response was served from server-side cache.
+    * `error` (`String.t() | nil`) — Error message if execution failed.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags from the responder.
   """
 
   @type t :: %__MODULE__{

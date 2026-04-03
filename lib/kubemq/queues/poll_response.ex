@@ -5,11 +5,20 @@ defmodule KubeMQ.PollResponse do
   Tracks transaction state to prevent double-ack/nack. Transaction methods
   delegate to the downstream GenServer that owns the bidi stream.
 
+  ## Fields
+
+    * `transaction_id` (`String.t()`) — Server-assigned transaction identifier.
+    * `messages` (`[KubeMQ.QueueMessage.t()]`) — List of received queue messages.
+    * `is_error` (`boolean()`) — Whether the poll itself returned an error.
+    * `error` (`String.t() | nil`) — Error message if `is_error` is true.
+    * `state` (`state()`) — Transaction state: `:pending`, `:acked`, `:nacked`, or `:expired`. Default: `:pending`.
+    * `downstream_pid` (`pid() | nil`) — PID of the downstream GenServer managing the bidi stream.
+
   ## Usage
 
       {:ok, poll} = KubeMQ.Client.poll_queue(client, channel: "orders", max_items: 10)
       # Process messages...
-      :ok = KubeMQ.PollResponse.ack_all(poll)
+      {:ok, _} = KubeMQ.PollResponse.ack_all(poll)
   """
 
   alias KubeMQ.{Error, Validation}
@@ -27,6 +36,26 @@ defmodule KubeMQ.PollResponse do
 
   defstruct [:transaction_id, :messages, :is_error, :error, :downstream_pid, state: :pending]
 
+  @doc """
+  Create a new PollResponse struct.
+
+  ## Options
+
+    * `:transaction_id` — Transaction ID string (default: `""`)
+    * `:messages` — List of `KubeMQ.QueueMessage` structs (default: `[]`)
+    * `:is_error` — Whether the poll returned an error (default: `false`)
+    * `:error` — Error message string if `is_error` is true
+    * `:state` — Transaction state atom (default: `:pending`)
+    * `:downstream_pid` — PID of the downstream GenServer
+
+  ## Examples
+
+      iex> poll = KubeMQ.PollResponse.new(transaction_id: "tx-1", messages: [])
+      iex> poll.state
+      :pending
+      iex> poll.transaction_id
+      "tx-1"
+  """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{
@@ -39,6 +68,18 @@ defmodule KubeMQ.PollResponse do
     }
   end
 
+  @doc """
+  Acknowledge all messages in this poll response.
+
+  Transitions the response state from `:pending` to `:acked`. Returns
+  `{:error, %KubeMQ.Error{}}` if already acked/nacked or if the downstream
+  process is not alive.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec ack_all(t()) :: {:ok, t()} | {:error, Error.t()}
   def ack_all(%__MODULE__{} = poll) do
     with :ok <- validate_pending(poll) do
@@ -49,6 +90,17 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Reject (negative-acknowledge) all messages in this poll response.
+
+  Transitions the response state from `:pending` to `:nacked`, making
+  the messages available for redelivery.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec nack_all(t()) :: {:ok, t()} | {:error, Error.t()}
   def nack_all(%__MODULE__{} = poll) do
     with :ok <- validate_pending(poll) do
@@ -59,6 +111,17 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Requeue all messages to a different channel.
+
+  Moves all messages from this poll response to `requeue_channel` and
+  transitions the state to `:acked`.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state, or requeue channel is invalid
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec requeue_all(t(), channel :: String.t()) :: {:ok, t()} | {:error, Error.t()}
   def requeue_all(%__MODULE__{} = poll, requeue_channel) do
     with :ok <- validate_pending(poll),
@@ -70,6 +133,17 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Acknowledge a specific range of messages by their sequence numbers.
+
+  Unlike `ack_all/1`, this does not transition the overall transaction state,
+  allowing partial acknowledgment within a poll response.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec ack_range(t(), sequences :: [integer()]) :: :ok | {:error, Error.t()}
   def ack_range(%__MODULE__{} = poll, sequences) when is_list(sequences) do
     with :ok <- validate_pending(poll) do
@@ -77,6 +151,17 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Reject a specific range of messages by their sequence numbers.
+
+  Rejected messages become available for redelivery. Does not transition
+  the overall transaction state.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec nack_range(t(), sequences :: [integer()]) :: :ok | {:error, Error.t()}
   def nack_range(%__MODULE__{} = poll, sequences) when is_list(sequences) do
     with :ok <- validate_pending(poll) do
@@ -84,6 +169,17 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Requeue a specific range of messages to a different channel.
+
+  Moves messages identified by `sequences` to `requeue_channel`. Does not
+  transition the overall transaction state.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state, or requeue channel is invalid
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec requeue_range(t(), sequences :: [integer()], channel :: String.t()) ::
           :ok | {:error, Error.t()}
   def requeue_range(%__MODULE__{} = poll, sequences, requeue_channel)
@@ -97,6 +193,14 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Get the list of active (unacknowledged) message offsets in this transaction.
+
+  ## Errors
+
+    * `:validation` — transaction is not in `:pending` state
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec active_offsets(t()) :: {:ok, [integer()]} | {:error, Error.t()}
   def active_offsets(%__MODULE__{} = poll) do
     with :ok <- validate_pending(poll) do
@@ -104,6 +208,15 @@ defmodule KubeMQ.PollResponse do
     end
   end
 
+  @doc """
+  Check whether the transaction is still active on the server.
+
+  Returns `{:ok, true}` if the transaction is active, `{:ok, false}` if expired.
+
+  ## Errors
+
+    * `:stream_broken` — downstream process is not alive
+  """
   @spec transaction_status(t()) :: {:ok, boolean()} | {:error, Error.t()}
   def transaction_status(%__MODULE__{} = poll) do
     safe_call(poll.downstream_pid, {:transaction_status, poll.transaction_id})

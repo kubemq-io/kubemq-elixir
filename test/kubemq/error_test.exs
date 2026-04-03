@@ -1,5 +1,6 @@
 defmodule KubeMQ.ErrorTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.Error
 
   alias KubeMQ.Error
 

@@ -1,6 +1,14 @@
 defmodule KubeMQ.EventStoreResult do
   @moduledoc """
   Result of sending a persistent event to KubeMQ Events Store.
+
+  Returned from `KubeMQ.Client.send_event_store/2`.
+
+  ## Fields
+
+    * `id` (`String.t()`) — Event identifier echoed from the server.
+    * `sent` (`boolean()`) — Whether the event was successfully persisted.
+    * `error` (`String.t() | nil`) — Error message if `sent` is `false`.
   """
 
   @type t :: %__MODULE__{

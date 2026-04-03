@@ -10,6 +10,14 @@ defmodule KubeMQ.ChannelInfo do
     * `is_active` - Whether the channel currently has active clients
     * `incoming` - Incoming message statistics
     * `outgoing` - Outgoing message statistics
+
+  ## Usage
+
+      iex> info = %KubeMQ.ChannelInfo{name: "orders", type: "queues"}
+      iex> info.name
+      "orders"
+      iex> info.is_active
+      false
   """
 
   @type t :: %__MODULE__{

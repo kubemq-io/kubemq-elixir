@@ -1,6 +1,17 @@
 defmodule KubeMQ.QueueSendResult do
   @moduledoc """
   Result of sending a queue message.
+
+  Returned from `KubeMQ.Client.send_queue_message/2`.
+
+  ## Fields
+
+    * `message_id` (`String.t()`) — ID of the sent message.
+    * `sent_at` (`integer()`) — Unix timestamp when the message was accepted by the server.
+    * `expiration_at` (`integer()`) — Unix timestamp when the message will expire (0 if no expiration).
+    * `delayed_to` (`integer()`) — Unix timestamp when the message will become available (0 if no delay).
+    * `is_error` (`boolean()`) — Whether sending failed.
+    * `error` (`String.t() | nil`) — Error message if `is_error` is true.
   """
 
   @type t :: %__MODULE__{

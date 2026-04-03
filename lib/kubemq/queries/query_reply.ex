@@ -2,6 +2,19 @@ defmodule KubeMQ.QueryReply do
   @moduledoc """
   Reply constructed by a query subscriber to respond to a received query.
 
+  ## Fields
+
+    * `request_id` (`String.t()`) — ID of the original query (from `KubeMQ.QueryReceive.id`).
+    * `response_to` (`String.t()`) — Reply channel (from `KubeMQ.QueryReceive.reply_channel`).
+    * `metadata` (`String.t() | nil`) — Optional response metadata.
+    * `body` (`binary() | nil`) — Response payload.
+    * `client_id` (`String.t() | nil`) — Responder identifier. Set automatically.
+    * `executed` (`boolean()`) — Whether the query was executed successfully. Default: `false`.
+    * `error` (`String.t() | nil`) — Error message if execution failed.
+    * `cache_hit` (`boolean()`) — Whether this reply is from cache. Default: `false`.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags. Default: `%{}`.
+    * `span` (`binary() | nil`) — Tracing span context (internal).
+
   ## Usage
 
       reply = KubeMQ.QueryReply.new(

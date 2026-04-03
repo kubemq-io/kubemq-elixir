@@ -1,5 +1,6 @@
 defmodule KubeMQ.QueryTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.Query
 
   alias KubeMQ.Query
 
