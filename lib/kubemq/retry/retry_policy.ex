@@ -5,6 +5,13 @@ defmodule KubeMQ.RetryPolicy do
   Applied by the transport layer when operations fail with retryable error codes
   (`:transient`, `:timeout`, `:throttling`).
 
+  ## Fields
+
+    * `max_retries` (`non_neg_integer()`) — Maximum number of retry attempts. Default: `3`.
+    * `initial_delay` (`pos_integer()`) — First retry delay in milliseconds. Default: `100`.
+    * `max_delay` (`pos_integer()`) — Maximum retry delay in milliseconds. Default: `1_000`.
+    * `multiplier` (`float()`) — Exponential backoff multiplier. Default: `2.0`.
+
   ## Defaults
 
       %KubeMQ.RetryPolicy{
@@ -27,6 +34,24 @@ defmodule KubeMQ.RetryPolicy do
             max_delay: 1_000,
             multiplier: 2.0
 
+  @doc """
+  Create a new RetryPolicy struct from keyword options.
+
+  ## Options
+
+    * `:max_retries` — Maximum retry attempts (default: `3`)
+    * `:initial_delay` — First retry delay in ms (default: `100`)
+    * `:max_delay` — Maximum retry delay in ms (default: `1_000`)
+    * `:multiplier` — Exponential backoff multiplier (default: `2.0`)
+
+  ## Examples
+
+      iex> policy = KubeMQ.RetryPolicy.new(max_retries: 5, initial_delay: 200)
+      iex> policy.max_retries
+      5
+      iex> policy.max_delay
+      1000
+  """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{
@@ -39,6 +64,14 @@ defmodule KubeMQ.RetryPolicy do
 
   @doc """
   Build from the `:retry_policy` keyword list in client configuration.
+
+  ## Examples
+
+      iex> policy = KubeMQ.RetryPolicy.from_config(max_retries: 5, initial_delay: 200)
+      iex> policy.max_retries
+      5
+      iex> policy.initial_delay
+      200
   """
   @spec from_config(keyword()) :: t()
   def from_config(config) when is_list(config) do

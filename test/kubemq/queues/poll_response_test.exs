@@ -1,5 +1,6 @@
 defmodule KubeMQ.PollResponseTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.PollResponse
 
   alias KubeMQ.{Error, PollResponse}
 

@@ -153,6 +153,18 @@ defmodule KubeMQ.Config do
   @spec schema() :: keyword()
   def schema, do: @schema
 
+  @doc """
+  Validate and apply defaults to client options, raising on invalid input.
+
+  Returns the validated keyword list with all defaults applied.
+  Raises `NimbleOptions.ValidationError` if validation fails.
+
+  ## Examples
+
+      iex> opts = KubeMQ.Config.validate!(client_id: "my-app")
+      iex> Keyword.get(opts, :address)
+      "localhost:50000"
+  """
   @spec validate!(keyword()) :: keyword()
   def validate!(opts) do
     opts
@@ -160,6 +172,19 @@ defmodule KubeMQ.Config do
     |> enforce_keepalive_minimum()
   end
 
+  @doc """
+  Validate and apply defaults to client options.
+
+  Returns `{:ok, validated_opts}` on success or `{:error, validation_error}` on failure.
+
+  ## Examples
+
+      iex> {:ok, opts} = KubeMQ.Config.validate(client_id: "test")
+      iex> Keyword.get(opts, :client_id)
+      "test"
+
+      iex> {:error, %NimbleOptions.ValidationError{}} = KubeMQ.Config.validate([])
+  """
   @spec validate(keyword()) :: {:ok, keyword()} | {:error, NimbleOptions.ValidationError.t()}
   def validate(opts) do
     case NimbleOptions.validate(opts, @schema) do

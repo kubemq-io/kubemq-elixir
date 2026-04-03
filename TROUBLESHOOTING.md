@@ -200,6 +200,62 @@ KubeMQ.Client.start_link(
 
 **Solution**: Use `KubeMQ.Subscription.active?/1` to check before creating new subscriptions, or use the supervision tree to manage subscription lifecycle.
 
+## Debug Logging
+
+### Enabling SDK Debug Logs
+
+The SDK uses Elixir's standard `Logger` for internal logging. To see SDK activity:
+
+```elixir
+# In config/config.exs or config/dev.exs
+config :logger, level: :debug
+```
+
+### Log Levels Used by the SDK
+
+| Level     | What is logged                                        |
+|-----------|-------------------------------------------------------|
+| `:debug`  | gRPC channel creation, subscription setup, proto mapping |
+| `:info`   | Client start/stop, connection state transitions       |
+| `:warning`| Retry attempts, keepalive mismatches, reconnection    |
+| `:error`  | Connection failures, stream errors, unrecoverable errors |
+
+### Filtering SDK Logs
+
+To see only KubeMQ SDK logs, use module-based filtering:
+
+```elixir
+config :logger, :console,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:module]
+
+# Then filter in your log backend for modules starting with KubeMQ
+```
+
+### Telemetry Events
+
+The SDK emits `:telemetry` events for every client operation. Attach handlers
+for operational monitoring:
+
+```elixir
+:telemetry.attach_many("kubemq-logger", [
+  [:kubemq, :client, :send_event, :start],
+  [:kubemq, :client, :send_event, :stop],
+  [:kubemq, :client, :send_event, :exception]
+], &handle_event/4, nil)
+```
+
+All client-level events follow the pattern `[:kubemq, :client, <operation>, <phase>]` where:
+- `<operation>` is the function atom (e.g., `:send_event`, `:poll_queue`, `:send_command`)
+- `<phase>` is `:start`, `:stop`, or `:exception`
+
+Measurements include `:system_time` (start) and `:duration` (stop/exception).
+Metadata includes `:operation`, `:channel`, and `:client_id`.
+
+The internal connection layer also emits `[:kubemq, :connection, :connect, <phase>]` events
+for connection lifecycle operations. These are lower-level and primarily useful for
+debugging connection issues. Metadata includes `:address` and `:client_id`.
+
 ## Getting Help
 
 If this guide doesn't resolve your issue:

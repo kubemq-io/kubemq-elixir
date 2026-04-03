@@ -2,6 +2,18 @@ defmodule KubeMQ.CommandReply do
   @moduledoc """
   Reply constructed by a command subscriber to respond to a received command.
 
+  ## Fields
+
+    * `request_id` (`String.t()`) — ID of the original command (from `KubeMQ.CommandReceive.id`).
+    * `response_to` (`String.t()`) — Reply channel (from `KubeMQ.CommandReceive.reply_channel`).
+    * `metadata` (`String.t() | nil`) — Optional response metadata.
+    * `body` (`binary() | nil`) — Optional response payload.
+    * `client_id` (`String.t() | nil`) — Responder identifier. Set automatically.
+    * `executed` (`boolean()`) — Whether the command was executed successfully. Default: `false`.
+    * `error` (`String.t() | nil`) — Error message if execution failed.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags. Default: `%{}`.
+    * `span` (`binary() | nil`) — Tracing span context (internal).
+
   ## Usage
 
       reply = KubeMQ.CommandReply.new(

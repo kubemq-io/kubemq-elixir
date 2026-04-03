@@ -5,6 +5,19 @@ defmodule KubeMQ.Query do
   Queries are request-response messages where the sender expects data back.
   Supports server-side caching via `cache_key` and `cache_ttl`.
 
+  ## Fields
+
+    * `id` (`String.t() | nil`) — Unique query identifier. Auto-generated if nil.
+    * `channel` (`String.t()`) — Target channel name. Required for sending.
+    * `metadata` (`String.t() | nil`) — Optional metadata string.
+    * `body` (`binary() | nil`) — Query payload.
+    * `timeout` (`pos_integer()`) — Timeout in milliseconds. Default: `10_000`.
+    * `client_id` (`String.t() | nil`) — Sender identifier. Set automatically by `KubeMQ.Client`.
+    * `cache_key` (`String.t() | nil`) — Server-side cache key. Set to enable response caching.
+    * `cache_ttl` (`pos_integer() | nil`) — Cache time-to-live in milliseconds.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags. Default: `%{}`.
+    * `span` (`binary() | nil`) — Tracing span context (internal).
+
   ## Usage
 
       query = KubeMQ.Query.new(
@@ -43,6 +56,30 @@ defmodule KubeMQ.Query do
     tags: %{}
   ]
 
+  @doc """
+  Create a new Query struct from keyword options.
+
+  ## Options
+
+    * `:id` — Query ID string (auto-generated if nil)
+    * `:channel` — Target channel name (required for sending)
+    * `:metadata` — Metadata string
+    * `:body` — Query payload (binary)
+    * `:timeout` — Timeout in milliseconds (default: `10_000`)
+    * `:client_id` — Client identifier (set automatically by `KubeMQ.Client`)
+    * `:cache_key` — Server-side cache key
+    * `:cache_ttl` — Cache time-to-live in milliseconds
+
+  ## Examples
+
+      iex> query = KubeMQ.Query.new(channel: "products.lookup", cache_key: "p:123", cache_ttl: 60_000)
+      iex> query.channel
+      "products.lookup"
+      iex> query.cache_key
+      "p:123"
+      iex> query.timeout
+      10000
+  """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{

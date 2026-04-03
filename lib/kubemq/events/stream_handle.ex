@@ -24,11 +24,20 @@ defmodule KubeMQ.EventStreamHandle do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @doc """
+  Send an event through the streaming handle.
+
+  The event is written to the underlying bidirectional gRPC stream.
+  Returns `:ok` on success or `{:error, %KubeMQ.Error{}}` on failure.
+  """
   @spec send(t(), KubeMQ.Event.t()) :: :ok | {:error, KubeMQ.Error.t()}
   def send(handle, %KubeMQ.Event{} = event) do
     GenServer.call(handle, {:send, event})
   end
 
+  @doc """
+  Close the event stream handle, terminating the underlying gRPC stream.
+  """
   @spec close(t()) :: :ok
   def close(handle) do
     GenServer.stop(handle, :normal)

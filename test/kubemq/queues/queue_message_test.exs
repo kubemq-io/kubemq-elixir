@@ -1,5 +1,6 @@
 defmodule KubeMQ.QueueMessageTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.QueueMessage
 
   alias KubeMQ.QueueAttributes
   alias KubeMQ.QueueMessage

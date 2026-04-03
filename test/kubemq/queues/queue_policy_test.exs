@@ -1,5 +1,6 @@
 defmodule KubeMQ.QueuePolicyTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.QueuePolicy
 
   alias KubeMQ.QueuePolicy
 

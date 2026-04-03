@@ -2,8 +2,19 @@ defmodule KubeMQ.QueryReceive do
   @moduledoc """
   Received query from a KubeMQ query subscription.
 
-  The `reply_channel` field must be copied to `KubeMQ.QueryReply.response_to`
-  when constructing a reply.
+  Delivered to the `:on_query` callback registered via
+  `KubeMQ.Client.subscribe_to_queries/3`. The `reply_channel` field must be
+  copied to `KubeMQ.QueryReply.response_to` when constructing a reply.
+
+  ## Fields
+
+    * `id` (`String.t()`) — Unique query identifier.
+    * `channel` (`String.t()`) — Channel the query was sent to.
+    * `metadata` (`String.t()`) — Metadata string set by the sender.
+    * `body` (`binary()`) — Query payload.
+    * `reply_channel` (`String.t()`) — Channel for sending the reply back (copy to `QueryReply.response_to`).
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags set by the sender.
+    * `span` (`binary() | nil`) — Tracing span context (internal).
   """
 
   @type t :: %__MODULE__{

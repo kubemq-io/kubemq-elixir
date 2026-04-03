@@ -1,6 +1,14 @@
 defmodule KubeMQ.QueueBatchResult do
   @moduledoc """
   Result of sending a batch of queue messages.
+
+  Returned from `KubeMQ.Client.send_queue_messages/2`.
+
+  ## Fields
+
+    * `batch_id` (`String.t()`) — Batch identifier.
+    * `results` (`[KubeMQ.QueueSendResult.t()]`) — Per-message send results.
+    * `have_errors` (`boolean()`) — Whether any message in the batch failed to send.
   """
 
   @type t :: %__MODULE__{

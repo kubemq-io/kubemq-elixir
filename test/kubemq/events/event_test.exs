@@ -1,5 +1,6 @@
 defmodule KubeMQ.EventTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.Event
 
   alias KubeMQ.Event
 

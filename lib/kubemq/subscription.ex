@@ -22,6 +22,17 @@ defmodule KubeMQ.Subscription do
     %__MODULE__{pid: pid, ref: ref}
   end
 
+  @doc """
+  Cancel an active subscription and stop its process.
+
+  Demonitors the subscription process and stops it gracefully. Safe to call
+  on already-stopped subscriptions.
+
+  ## Examples
+
+      {:ok, sub} = KubeMQ.Client.subscribe_to_events(client, "channel", on_event: &handler/1)
+      :ok = KubeMQ.Subscription.cancel(sub)
+  """
   @spec cancel(t()) :: :ok
   def cancel(%__MODULE__{pid: pid, ref: ref}) do
     Process.demonitor(ref, [:flush])
@@ -33,6 +44,13 @@ defmodule KubeMQ.Subscription do
     :ok
   end
 
+  @doc """
+  Check whether the subscription process is still alive.
+
+  ## Examples
+
+      true = KubeMQ.Subscription.active?(sub)
+  """
   @spec active?(t()) :: boolean()
   def active?(%__MODULE__{pid: pid}) do
     Process.alive?(pid)

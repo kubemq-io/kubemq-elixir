@@ -1,5 +1,6 @@
 defmodule KubeMQ.RetryPolicyTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.RetryPolicy
 
   alias KubeMQ.RetryPolicy
 
