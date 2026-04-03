@@ -1,6 +1,13 @@
 defmodule KubeMQ.PollRequest do
   @moduledoc """
   Request parameters for polling queue messages via the Stream API.
+
+  ## Fields
+
+    * `channel` (`String.t()`) — Queue channel to poll from.
+    * `max_items` (`pos_integer()`) — Maximum number of messages to receive. Default: `1`.
+    * `wait_timeout` (`pos_integer()`) — How long to wait for messages in milliseconds. Default: `5_000`.
+    * `auto_ack` (`boolean()`) — Automatically acknowledge messages on receive. Default: `false`.
   """
 
   @type t :: %__MODULE__{

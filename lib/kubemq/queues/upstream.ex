@@ -36,12 +36,21 @@ defmodule KubeMQ.QueueUpstreamHandle do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @doc """
+  Send a batch of queue messages through the upstream streaming handle.
+
+  Writes messages to the underlying bidirectional gRPC stream and awaits
+  per-message send results from the server.
+  """
   @spec send(t(), [QueueMessage.t()]) ::
           {:ok, [QueueSendResult.t()]} | {:error, Error.t()}
   def send(handle, messages) when is_list(messages) do
     GenServer.call(handle, {:send, messages}, 30_000)
   end
 
+  @doc """
+  Close the queue upstream handle, terminating the underlying gRPC stream.
+  """
   @spec close(t()) :: :ok
   def close(handle) do
     GenServer.stop(handle, :normal)

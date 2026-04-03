@@ -1,6 +1,14 @@
 defmodule KubeMQ.CommandResponse do
   @moduledoc """
   Response received after sending a command via `KubeMQ.Client.send_command/2`.
+
+  ## Fields
+
+    * `command_id` (`String.t()`) — ID of the command that was executed.
+    * `executed` (`boolean()`) — Whether the command was executed successfully.
+    * `executed_at` (`integer()`) — Unix timestamp when the command was executed.
+    * `error` (`String.t() | nil`) — Error message if execution failed.
+    * `tags` (`%{String.t() => String.t()}`) — Key-value tags from the responder.
   """
 
   @type t :: %__MODULE__{

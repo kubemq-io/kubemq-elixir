@@ -1,5 +1,6 @@
 defmodule KubeMQ.Retry.ReconnectPolicyTest do
   use ExUnit.Case, async: true
+  doctest KubeMQ.ReconnectPolicy
 
   alias KubeMQ.ReconnectPolicy
 

@@ -28,6 +28,52 @@ defmodule KubeMQ.Client do
   OTP pattern for state management and connection lifecycle. For high-throughput scenarios, use
   the streaming APIs (EventStreamHandle, EventStoreStreamHandle, QueueUpstreamHandle) which
   bypass the Client GenServer and communicate directly with the gRPC transport.
+
+  ## Reconnection Behavior
+
+  The client automatically reconnects when the gRPC connection is lost.
+
+  ### State Machine
+
+      :connecting → :ready → (disconnect) → :reconnecting → :ready
+                                                              ↓
+                                                            :closed (on close/1 or max attempts)
+
+  ### Operation Behavior During Reconnection
+
+  | Operation Type      | During Reconnection                    |
+  |---------------------|----------------------------------------|
+  | Unary sends         | Buffered (up to `reconnect_buffer_size`) |
+  | Stream sends        | `:stream_broken` error                 |
+  | Subscriptions       | Auto-re-established on reconnect       |
+  | Ping                | Returns `:transient` error             |
+  | Channel management  | Buffered or `:transient` error         |
+
+  ### Configuration
+
+  Reconnection is controlled by the `:reconnect_policy` option:
+
+      reconnect_policy: [
+        enabled: true,           # Enable/disable auto-reconnect
+        initial_delay: 1_000,    # First retry delay (ms)
+        max_delay: 30_000,       # Max retry delay (ms)
+        max_attempts: 0,         # 0 = unlimited
+        multiplier: 2.0          # Exponential backoff multiplier
+      ]
+
+  ### Lifecycle Callbacks
+
+  Monitor connection state changes:
+
+      KubeMQ.Client.start_link(
+        address: "localhost:50000",
+        client_id: "my-app",
+        on_connected: fn -> Logger.info("Connected") end,
+        on_disconnected: fn -> Logger.warning("Disconnected") end,
+        on_reconnecting: fn -> Logger.info("Reconnecting...") end,
+        on_reconnected: fn -> Logger.info("Reconnected") end,
+        on_closed: fn -> Logger.info("Closed") end
+      )
   """
 
   use GenServer
@@ -73,6 +119,11 @@ defmodule KubeMQ.Client do
 
   See `KubeMQ.Config` for the full schema. Required: `:client_id`.
 
+  ## Errors
+
+    * `:validation` — invalid configuration (NimbleOptions validation failure)
+    * `:transient` — unable to establish initial connection
+
   ## Examples
 
       {:ok, client} = KubeMQ.Client.start_link(
@@ -102,30 +153,44 @@ defmodule KubeMQ.Client do
 
   @doc """
   Returns `true` if the underlying connection is in the `:ready` state.
+
+  Always succeeds — returns a boolean.
   """
   @spec connected?(t()) :: boolean()
   def connected?(client), do: GenServer.call(client, :connected?)
 
   @doc """
   Returns the current connection state atom.
+
+  Always succeeds — returns `:connecting`, `:ready`, `:reconnecting`, or `:closed`.
   """
   @spec connection_state(t()) :: :connecting | :ready | :reconnecting | :closed
   def connection_state(client), do: GenServer.call(client, :connection_state)
 
   @doc """
   Ping the KubeMQ server and return server information.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec ping(t()) :: {:ok, ServerInfo.t()} | {:error, Error.t()}
   def ping(client), do: GenServer.call(client, :ping)
 
   @doc """
-  Ping the KubeMQ server, raising on failure.
+  Ping the KubeMQ server, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `ping/1` — see its `## Errors` section.
   """
   @spec ping!(t()) :: ServerInfo.t()
   def ping!(client), do: bang!(ping(client))
 
   @doc """
   Close the client, stopping all subscriptions and the underlying connection.
+
+  Always succeeds (calls `GenServer.stop/2`).
   """
   @spec close(t()) :: :ok
   def close(client), do: GenServer.stop(client, :normal)
@@ -136,24 +201,47 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a single event (fire-and-forget).
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_event(t(), KubeMQ.Event.t()) :: :ok | {:error, Error.t()}
   def send_event(client, event), do: GenServer.call(client, {:send_event, event})
 
   @doc """
-  Send a single event, raising on failure.
+  Send a single event, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_event/2` — see its `## Errors` section.
   """
   @spec send_event!(t(), KubeMQ.Event.t()) :: :ok
   def send_event!(client, event), do: bang_ok!(send_event(client, event))
 
   @doc """
   Open a bidirectional event stream. Returns a handle for sending events.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_event_stream(t()) :: {:ok, KubeMQ.EventStreamHandle.t()} | {:error, Error.t()}
   def send_event_stream(client), do: GenServer.call(client, :send_event_stream)
 
   @doc """
-  Open a bidirectional event stream, raising on failure.
+  Open a bidirectional event stream, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_event_stream/1` — see its `## Errors` section.
   """
   @spec send_event_stream!(t()) :: KubeMQ.EventStreamHandle.t()
   def send_event_stream!(client), do: bang!(send_event_stream(client))
@@ -167,6 +255,15 @@ defmodule KubeMQ.Client do
     * `:on_event` - Callback `fn %EventReceive{} -> :ok end`
     * `:on_error` - Error callback `fn %Error{} -> :ok end`
     * `:notify` - PID to receive `{:kubemq_event, event}` messages
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec subscribe_to_events(t(), String.t(), keyword()) ::
           {:ok, Subscription.t()} | {:error, Error.t()}
@@ -174,7 +271,9 @@ defmodule KubeMQ.Client do
     do: GenServer.call(client, {:subscribe_to_events, channel, opts})
 
   @doc """
-  Subscribe to events, raising on failure.
+  Subscribe to events, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `subscribe_to_events/3` — see its `## Errors` section.
   """
   @spec subscribe_to_events!(t(), String.t(), keyword()) :: Subscription.t()
   def subscribe_to_events!(client, channel, opts \\ []),
@@ -186,19 +285,40 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a persistent event to Events Store.
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_event_store(t(), KubeMQ.EventStore.t()) ::
           {:ok, KubeMQ.EventStoreResult.t()} | {:error, Error.t()}
   def send_event_store(client, event), do: GenServer.call(client, {:send_event_store, event})
 
   @doc """
-  Send a persistent event, raising on failure.
+  Send a persistent event, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_event_store/2` — see its `## Errors` section.
   """
   @spec send_event_store!(t(), KubeMQ.EventStore.t()) :: KubeMQ.EventStoreResult.t()
   def send_event_store!(client, event), do: bang!(send_event_store(client, event))
 
   @doc """
   Open a bidirectional event store stream with awaitable confirmation.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_event_store_stream(t()) ::
           {:ok, KubeMQ.EventStoreStreamHandle.t()} | {:error, Error.t()}
@@ -214,6 +334,15 @@ defmodule KubeMQ.Client do
     * `:on_event` - Callback `fn %EventStoreReceive{} -> :ok end`
     * `:on_error` - Error callback
     * `:notify` - PID to receive `{:kubemq_event_store, event}` messages
+
+  ## Errors
+
+    * `:validation` — channel is empty or start position is invalid
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec subscribe_to_events_store(t(), String.t(), keyword()) ::
           {:ok, Subscription.t()} | {:error, Error.t()}
@@ -226,6 +355,17 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a command and wait for a response.
+
+  ## Errors
+
+    * `:validation` — channel is empty, missing body/metadata, or invalid timeout
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_command(t(), KubeMQ.Command.t()) ::
           {:ok, KubeMQ.CommandResponse.t()} | {:error, Error.t()}
@@ -235,7 +375,9 @@ defmodule KubeMQ.Client do
   end
 
   @doc """
-  Send a command, raising on failure.
+  Send a command, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_command/2` — see its `## Errors` section.
   """
   @spec send_command!(t(), KubeMQ.Command.t()) :: KubeMQ.CommandResponse.t()
   def send_command!(client, command), do: bang!(send_command(client, command))
@@ -248,6 +390,15 @@ defmodule KubeMQ.Client do
     * `:group` - Consumer group name
     * `:on_command` - **Required.** `fn %CommandReceive{} -> %CommandReply{} end`
     * `:on_error` - Error callback
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec subscribe_to_commands(t(), String.t(), keyword()) ::
           {:ok, Subscription.t()} | {:error, Error.t()}
@@ -255,7 +406,9 @@ defmodule KubeMQ.Client do
     do: GenServer.call(client, {:subscribe_to_commands, channel, opts})
 
   @doc """
-  Subscribe to commands, raising on failure.
+  Subscribe to commands, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `subscribe_to_commands/3` — see its `## Errors` section.
   """
   @spec subscribe_to_commands!(t(), String.t(), keyword()) :: Subscription.t()
   def subscribe_to_commands!(client, channel, opts \\ []),
@@ -263,6 +416,12 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a command response (for manual response handling).
+
+  ## Errors
+
+    * `:validation` — missing required response fields
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec send_command_response(t(), KubeMQ.CommandReply.t()) :: :ok | {:error, Error.t()}
   def send_command_response(client, reply),
@@ -274,6 +433,17 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a query and wait for a response.
+
+  ## Errors
+
+    * `:validation` — channel is empty, missing body/metadata, invalid timeout, or invalid cache params
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_query(t(), KubeMQ.Query.t()) ::
           {:ok, KubeMQ.QueryResponse.t()} | {:error, Error.t()}
@@ -283,7 +453,9 @@ defmodule KubeMQ.Client do
   end
 
   @doc """
-  Send a query, raising on failure.
+  Send a query, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_query/2` — see its `## Errors` section.
   """
   @spec send_query!(t(), KubeMQ.Query.t()) :: KubeMQ.QueryResponse.t()
   def send_query!(client, query), do: bang!(send_query(client, query))
@@ -296,6 +468,15 @@ defmodule KubeMQ.Client do
     * `:group` - Consumer group name
     * `:on_query` - **Required.** `fn %QueryReceive{} -> %QueryReply{} end`
     * `:on_error` - Error callback
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec subscribe_to_queries(t(), String.t(), keyword()) ::
           {:ok, Subscription.t()} | {:error, Error.t()}
@@ -303,7 +484,9 @@ defmodule KubeMQ.Client do
     do: GenServer.call(client, {:subscribe_to_queries, channel, opts})
 
   @doc """
-  Subscribe to queries, raising on failure.
+  Subscribe to queries, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `subscribe_to_queries/3` — see its `## Errors` section.
   """
   @spec subscribe_to_queries!(t(), String.t(), keyword()) :: Subscription.t()
   def subscribe_to_queries!(client, channel, opts \\ []),
@@ -311,6 +494,12 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a query response (for manual response handling).
+
+  ## Errors
+
+    * `:validation` — missing required response fields
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec send_query_response(t(), KubeMQ.QueryReply.t()) :: :ok | {:error, Error.t()}
   def send_query_response(client, reply),
@@ -322,6 +511,17 @@ defmodule KubeMQ.Client do
 
   @doc """
   Send a single queue message.
+
+  ## Errors
+
+    * `:validation` — channel is empty or missing body/metadata
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_queue_message(t(), KubeMQ.QueueMessage.t()) ::
           {:ok, KubeMQ.QueueSendResult.t()} | {:error, Error.t()}
@@ -329,13 +529,26 @@ defmodule KubeMQ.Client do
     do: GenServer.call(client, {:send_queue_message, msg})
 
   @doc """
-  Send a single queue message, raising on failure.
+  Send a single queue message, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_queue_message/2` — see its `## Errors` section.
   """
   @spec send_queue_message!(t(), KubeMQ.QueueMessage.t()) :: KubeMQ.QueueSendResult.t()
   def send_queue_message!(client, msg), do: bang!(send_queue_message(client, msg))
 
   @doc """
   Send a batch of queue messages.
+
+  ## Errors
+
+    * `:validation` — empty batch or any message has an empty channel
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
+    * `:buffer_full` — reconnect buffer overflow
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec send_queue_messages(t(), [KubeMQ.QueueMessage.t()]) ::
           {:ok, KubeMQ.QueueBatchResult.t()} | {:error, Error.t()}
@@ -343,7 +556,9 @@ defmodule KubeMQ.Client do
     do: GenServer.call(client, {:send_queue_messages, msgs})
 
   @doc """
-  Send a batch of queue messages, raising on failure.
+  Send a batch of queue messages, raising `KubeMQ.Error` on failure.
+
+  Same error conditions as `send_queue_messages/2` — see its `## Errors` section.
   """
   @spec send_queue_messages!(t(), [KubeMQ.QueueMessage.t()]) :: KubeMQ.QueueBatchResult.t()
   def send_queue_messages!(client, msgs), do: bang!(send_queue_messages(client, msgs))
@@ -356,6 +571,13 @@ defmodule KubeMQ.Client do
     * `:max_messages` - Max messages to receive (1–1024, default 1)
     * `:wait_timeout` - Wait timeout in ms (default 5_000)
     * `:is_peek` - Peek without consuming (default false)
+
+  ## Errors
+
+    * `:validation` — channel is empty, invalid max_messages, or invalid wait_timeout
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec receive_queue_messages(t(), String.t(), keyword()) ::
           {:ok, KubeMQ.QueueReceiveResult.t()} | {:error, Error.t()}
@@ -370,6 +592,12 @@ defmodule KubeMQ.Client do
   ## Options
 
     * `:wait_timeout` - Wait timeout in ms (default 5_000)
+
+  ## Errors
+
+    * `:validation` — channel is empty or contains whitespace
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec ack_all_queue_messages(t(), String.t(), keyword()) ::
           {:ok, KubeMQ.QueueAckAllResult.t()} | {:error, Error.t()}
@@ -384,6 +612,14 @@ defmodule KubeMQ.Client do
 
   @doc """
   Open a queue upstream (send) stream.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
+
+  See the "Reconnection Behavior" section for how this operation behaves
+  during connection loss and recovery.
   """
   @spec queue_upstream(t()) ::
           {:ok, KubeMQ.QueueUpstreamHandle.t()} | {:error, Error.t()}
@@ -398,6 +634,13 @@ defmodule KubeMQ.Client do
     * `:max_items` - Max items (1–1024, default 1)
     * `:wait_timeout` - Wait timeout in ms (default 5_000)
     * `:auto_ack` - Auto-acknowledge (default false)
+
+  ## Errors
+
+    * `:validation` — channel is empty, invalid max_items, or invalid wait_timeout
+    * `:transient` — temporary network/server issue (retryable)
+    * `:timeout` — operation timed out (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec poll_queue(t(), keyword()) :: {:ok, KubeMQ.PollResponse.t()} | {:error, Error.t()}
   def poll_queue(client, opts) do
@@ -411,6 +654,11 @@ defmodule KubeMQ.Client do
 
   @doc """
   Create a channel of the specified type.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec create_channel(t(), String.t(), channel_type()) :: :ok | {:error, Error.t()}
   def create_channel(client, name, type),
@@ -418,6 +666,12 @@ defmodule KubeMQ.Client do
 
   @doc """
   Delete a channel of the specified type.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:not_found` — channel does not exist
+    * `:client_closed` — client has been closed
   """
   @spec delete_channel(t(), String.t(), channel_type()) :: :ok | {:error, Error.t()}
   def delete_channel(client, name, type),
@@ -425,6 +679,11 @@ defmodule KubeMQ.Client do
 
   @doc """
   List channels of the specified type, optionally filtered by search pattern.
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:client_closed` — client has been closed
   """
   @spec list_channels(t(), channel_type(), String.t()) ::
           {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
@@ -433,6 +692,12 @@ defmodule KubeMQ.Client do
 
   @doc """
   Purge all messages from a queue channel (ack all pending messages).
+
+  ## Errors
+
+    * `:transient` — temporary network/server issue (retryable)
+    * `:not_found` — channel does not exist
+    * `:client_closed` — client has been closed
   """
   @spec purge_queue_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def purge_queue_channel(client, name),
@@ -442,65 +707,65 @@ defmodule KubeMQ.Client do
   # Channel Management — Convenience Aliases
   # ===========================================================================
 
-  @doc "Create an events channel."
+  @doc "Create an events channel. See `create_channel/3` for errors."
   @spec create_events_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def create_events_channel(client, name), do: create_channel(client, name, :events)
 
-  @doc "Create an events store channel."
+  @doc "Create an events store channel. See `create_channel/3` for errors."
   @spec create_events_store_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def create_events_store_channel(client, name), do: create_channel(client, name, :events_store)
 
-  @doc "Create a commands channel."
+  @doc "Create a commands channel. See `create_channel/3` for errors."
   @spec create_commands_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def create_commands_channel(client, name), do: create_channel(client, name, :commands)
 
-  @doc "Create a queries channel."
+  @doc "Create a queries channel. See `create_channel/3` for errors."
   @spec create_queries_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def create_queries_channel(client, name), do: create_channel(client, name, :queries)
 
-  @doc "Create a queues channel."
+  @doc "Create a queues channel. See `create_channel/3` for errors."
   @spec create_queues_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def create_queues_channel(client, name), do: create_channel(client, name, :queues)
 
-  @doc "Delete an events channel."
+  @doc "Delete an events channel. See `delete_channel/3` for errors."
   @spec delete_events_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def delete_events_channel(client, name), do: delete_channel(client, name, :events)
 
-  @doc "Delete an events store channel."
+  @doc "Delete an events store channel. See `delete_channel/3` for errors."
   @spec delete_events_store_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def delete_events_store_channel(client, name), do: delete_channel(client, name, :events_store)
 
-  @doc "Delete a commands channel."
+  @doc "Delete a commands channel. See `delete_channel/3` for errors."
   @spec delete_commands_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def delete_commands_channel(client, name), do: delete_channel(client, name, :commands)
 
-  @doc "Delete a queries channel."
+  @doc "Delete a queries channel. See `delete_channel/3` for errors."
   @spec delete_queries_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def delete_queries_channel(client, name), do: delete_channel(client, name, :queries)
 
-  @doc "Delete a queues channel."
+  @doc "Delete a queues channel. See `delete_channel/3` for errors."
   @spec delete_queues_channel(t(), String.t()) :: :ok | {:error, Error.t()}
   def delete_queues_channel(client, name), do: delete_channel(client, name, :queues)
 
-  @doc "List events channels."
+  @doc "List events channels. See `list_channels/3` for errors."
   @spec list_events_channels(t(), String.t()) :: {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
   def list_events_channels(client, search \\ ""), do: list_channels(client, :events, search)
 
-  @doc "List events store channels."
+  @doc "List events store channels. See `list_channels/3` for errors."
   @spec list_events_store_channels(t(), String.t()) ::
           {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
   def list_events_store_channels(client, search \\ ""),
     do: list_channels(client, :events_store, search)
 
-  @doc "List commands channels."
+  @doc "List commands channels. See `list_channels/3` for errors."
   @spec list_commands_channels(t(), String.t()) :: {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
   def list_commands_channels(client, search \\ ""), do: list_channels(client, :commands, search)
 
-  @doc "List queries channels."
+  @doc "List queries channels. See `list_channels/3` for errors."
   @spec list_queries_channels(t(), String.t()) :: {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
   def list_queries_channels(client, search \\ ""), do: list_channels(client, :queries, search)
 
-  @doc "List queues channels."
+  @doc "List queues channels. See `list_channels/3` for errors."
   @spec list_queues_channels(t(), String.t()) :: {:ok, [ChannelInfo.t()]} | {:error, Error.t()}
   def list_queues_channels(client, search \\ ""), do: list_channels(client, :queues, search)
 

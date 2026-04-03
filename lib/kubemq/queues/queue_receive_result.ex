@@ -1,6 +1,16 @@
 defmodule KubeMQ.QueueReceiveResult do
   @moduledoc """
   Result of receiving messages from a queue via the Simple API.
+
+  ## Fields
+
+    * `request_id` (`String.t()`) — Request identifier.
+    * `messages` (`[KubeMQ.QueueMessage.t()]`) — List of received messages.
+    * `messages_received` (`non_neg_integer()`) — Number of messages received.
+    * `messages_expired` (`non_neg_integer()`) — Number of messages that expired during the request.
+    * `is_peek` (`boolean()`) — Whether this was a peek operation (messages not consumed).
+    * `is_error` (`boolean()`) — Whether the receive operation failed.
+    * `error` (`String.t() | nil`) — Error message if `is_error` is true.
   """
 
   @type t :: %__MODULE__{

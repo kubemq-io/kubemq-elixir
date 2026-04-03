@@ -27,7 +27,8 @@ defmodule KubeMQ.MixProject do
         "coveralls.html": :test
       ],
       package: package(),
-      description: "KubeMQ Elixir SDK - Kubernetes-native messaging client",
+      description:
+        "KubeMQ Elixir SDK — Kubernetes-native messaging client for events, commands, queries, and queues via gRPC",
       source_url: @source_url,
       aliases: aliases()
     ]
@@ -110,8 +111,24 @@ defmodule KubeMQ.MixProject do
   defp package do
     [
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @source_url},
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
+      links: %{
+        "GitHub" => @source_url,
+        "Documentation" => "https://hexdocs.pm/kubemq",
+        "KubeMQ" => "https://kubemq.io"
+      },
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      keywords: [
+        "kubemq",
+        "messaging",
+        "message-queue",
+        "grpc",
+        "kubernetes",
+        "pub-sub",
+        "queues",
+        "elixir-sdk",
+        "events",
+        "rpc"
+      ]
     ]
   end
 
