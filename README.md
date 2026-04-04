@@ -34,7 +34,7 @@ Add `kubemq` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:kubemq, "~> 0.1.0"}
+    {:kubemq, "~> 1.0"}
   ]
 end
 ```
