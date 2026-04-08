@@ -11,12 +11,20 @@ defmodule Burnin.Server do
   plug(:dispatch)
 
   get "/health" do
-    send_text(conn, 200, "ok")
+    send_json(conn, 200, %{status: "alive"})
   end
 
   get "/ready" do
     status = Burnin.Engine.status()
-    send_text(conn, 200, "ready:#{status.state}")
+    state = status.state
+
+    case state do
+      s when s in ["starting", "stopping"] ->
+        send_json(conn, 503, %{status: "not_ready", state: state})
+
+      _ ->
+        send_json(conn, 200, %{status: "ready", state: state})
+    end
   end
 
   get "/info" do
@@ -25,10 +33,8 @@ defmodule Burnin.Server do
   end
 
   get "/broker/status" do
-    case Burnin.Engine.broker_status() do
-      {:ok, info} -> send_text(conn, 200, "connected: #{inspect(info)}")
-      {:error, reason} -> send_text(conn, 503, "error: #{reason}")
-    end
+    result = Burnin.Engine.broker_status()
+    send_json(conn, 200, result)
   end
 
   post "/run/start" do
@@ -36,7 +42,7 @@ defmodule Burnin.Server do
 
     case Burnin.Engine.start_run(body) do
       {:ok, run_id} ->
-        send_json(conn, 200, %{status: "started", run_id: run_id})
+        send_json(conn, 202, %{run_id: run_id, state: "starting", message: "Run started"})
 
       {:error, reason} ->
         send_json(conn, 400, %{error: reason})
@@ -45,26 +51,23 @@ defmodule Burnin.Server do
 
   post "/run/stop" do
     case Burnin.Engine.stop_run() do
-      :ok -> send_json(conn, 200, %{status: "stopped"})
-      {:error, reason} -> send_json(conn, 400, %{error: reason})
+      :ok ->
+        status = Burnin.Engine.run_status()
+        send_json(conn, 202, %{run_id: status[:run_id], state: status[:state], message: "Run stopping"})
+
+      {:error, reason} ->
+        send_json(conn, 400, %{error: reason})
     end
   end
 
   get "/run" do
-    status = Burnin.Engine.status()
+    status = Burnin.Engine.run_status()
     send_json(conn, 200, status)
   end
 
   get "/run/status" do
-    status = Burnin.Engine.status()
-
-    summary = %{
-      state: status.state,
-      run_id: status.run_id,
-      elapsed_seconds: status.elapsed_seconds
-    }
-
-    send_json(conn, 200, summary)
+    status = Burnin.Engine.run_status()
+    send_json(conn, 200, status)
   end
 
   get "/run/config" do
@@ -99,14 +102,23 @@ defmodule Burnin.Server do
 
   defp send_json(conn, status, body) do
     conn
+    |> set_cors()
     |> put_resp_content_type("application/json")
     |> send_resp(status, Jason.encode!(body))
   end
 
   defp send_text(conn, status, text) do
     conn
+    |> set_cors()
     |> put_resp_content_type("text/plain")
     |> send_resp(status, text)
+  end
+
+  defp set_cors(conn) do
+    conn
+    |> put_resp_header("access-control-allow-origin", "*")
+    |> put_resp_header("access-control-allow-methods", "GET, POST, OPTIONS")
+    |> put_resp_header("access-control-allow-headers", "Content-Type")
   end
 
   defp read_body_text(conn) do
