@@ -63,3 +63,7 @@ thresholds:
 shutdown:
   drain_timeout_seconds: 10
   cleanup_channels: true
+
+metrics:
+  port: 8896
+  report_interval: 30s

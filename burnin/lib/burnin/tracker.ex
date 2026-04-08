@@ -57,7 +57,7 @@ defmodule Burnin.Tracker do
   @spec to_status_map(t(), [map()]) :: map()
   def to_status_map(tracker, pattern_statuses) do
     %{
-      state: Atom.to_string(tracker.state),
+      state: map_state_string(tracker.state),
       run_id: tracker.run_id,
       started_at: format_time(tracker.started_at),
       elapsed_seconds: elapsed_seconds(tracker),
@@ -66,6 +66,16 @@ defmodule Burnin.Tracker do
     }
   end
 
-  defp format_time(nil), do: ""
-  defp format_time(dt), do: DateTime.to_iso8601(dt)
+  @doc """
+  Maps internal atom states to the string values the dashboard expects.
+  :completed -> "stopped", :failed -> "error", others pass through as-is.
+  """
+  @spec map_state_string(run_state()) :: String.t()
+  def map_state_string(:completed), do: "stopped"
+  def map_state_string(:failed), do: "error"
+  def map_state_string(state), do: Atom.to_string(state)
+
+  @spec format_time(DateTime.t() | nil) :: String.t()
+  def format_time(nil), do: ""
+  def format_time(dt), do: DateTime.to_iso8601(dt)
 end
