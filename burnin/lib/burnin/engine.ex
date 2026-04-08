@@ -14,7 +14,9 @@ defmodule Burnin.Engine do
             config: nil,
             workers: [],
             timer_ref: nil,
-            final_statuses: nil
+            final_statuses: nil,
+            last_report: nil,
+            boot_time: nil
 
   def start_link(opts) do
     broker = Keyword.get(opts, :broker, "localhost:50000")
@@ -41,6 +43,10 @@ defmodule Burnin.Engine do
     GenServer.call(__MODULE__, :run_report)
   end
 
+  def run_status do
+    GenServer.call(__MODULE__, :run_status)
+  end
+
   def cleanup do
     GenServer.call(__MODULE__, :cleanup, 30_000)
   end
@@ -56,7 +62,7 @@ defmodule Burnin.Engine do
   @impl true
   def init(broker) do
     Process.flag(:trap_exit, true)
-    {:ok, %__MODULE__{broker: broker}}
+    {:ok, %__MODULE__{broker: broker, boot_time: DateTime.utc_now()}}
   end
 
   @impl true
@@ -100,14 +106,86 @@ defmodule Burnin.Engine do
     {:reply, Tracker.to_status_map(state.tracker, statuses), state}
   end
 
+  def handle_call(:run_status, _from, state) do
+    tracker = state.tracker
+
+    # Idle / error early returns (matching Go/Rust reference)
+    case tracker.state do
+      :idle ->
+        {:reply, %{run_id: nil, state: "idle"}, state}
+
+      :failed ->
+        {:reply, %{run_id: tracker.run_id, state: "error", error: tracker.verdict}, state}
+
+      _ ->
+        statuses = get_statuses(state)
+        elapsed = Tracker.elapsed_seconds(tracker)
+        state_str = Tracker.map_state_string(tracker.state)
+
+        # Aggregate totals from per-worker statuses
+        {total_sent, total_received, total_errors} =
+          Enum.reduce(statuses, {0, 0, 0}, fn s, {ts, tr, te} ->
+            {ts + s.sent, tr + s.received, te + s.errors}
+          end)
+
+        # Build pattern_states map: %{ "events" => %{state: ..., channels: <count>}, ... }
+        pattern_states =
+          Map.new(statuses, fn s ->
+            ps = if tracker.state == :completed, do: "stopped", else: "running"
+            ch_count = if is_list(s.channels), do: length(s.channels), else: s.channels
+            {s.name, %{state: ps, channels: ch_count}}
+          end)
+
+        result = %{
+          state: state_str,
+          run_id: tracker.run_id,
+          started_at: Tracker.format_time(tracker.started_at),
+          elapsed_seconds: elapsed,
+          totals: %{
+            sent: total_sent,
+            received: total_received,
+            lost: 0,
+            duplicated: 0,
+            corrupted: 0,
+            out_of_order: 0,
+            errors: total_errors,
+            reconnections: 0
+          },
+          pattern_states: pattern_states,
+          warmup_active: false
+        }
+
+        # Add remaining_seconds when a finite duration is configured
+        result =
+          if state.config do
+            duration_ms = Config.parse_duration(state.config.duration)
+
+            if duration_ms > 0 do
+              remaining = max(0, duration_ms / 1_000 - elapsed)
+              Map.put(result, :remaining_seconds, remaining)
+            else
+              result
+            end
+          else
+            result
+          end
+
+        {:reply, result, state}
+    end
+  end
+
   def handle_call(:run_config, _from, state) do
     {:reply, state.config, state}
+  end
+
+  def handle_call(:run_report, _from, %{last_report: report} = state) when is_map(report) do
+    {:reply, report, state}
   end
 
   def handle_call(:run_report, _from, state) do
     statuses = get_statuses(state)
     elapsed = Tracker.elapsed_seconds(state.tracker)
-    report = Report.generate_report(statuses, state.config, elapsed)
+    report = Report.generate_full_report(statuses, state.config, elapsed, state.tracker, state.broker)
     {:reply, report, state}
   end
 
@@ -121,20 +199,33 @@ defmodule Burnin.Engine do
     end)
 
     stop_workers(state.workers)
-    {:reply, :ok, %{state | workers: [], config: nil, tracker: Tracker.new()}}
+    {:reply, :ok, %{state | workers: [], config: nil, tracker: Tracker.new(), last_report: nil}}
   end
 
   def handle_call(:broker_status, _from, state) do
-    result = ping_broker(state.broker)
+    result = ping_broker_with_details(state.broker)
     {:reply, result, state}
   end
 
   def handle_call(:info, _from, state) do
+    {_, os_name} = :os.type()
+    uptime_seconds = DateTime.diff(DateTime.utc_now(), state.boot_time, :millisecond) / 1_000
+
     info = %{
       sdk: Burnin.sdk(),
-      version: Burnin.version(),
+      sdk_version: Burnin.version(),
+      burnin_version: Burnin.burnin_version(),
+      burnin_spec_version: Burnin.burnin_spec_version(),
+      os: Atom.to_string(os_name),
+      arch: to_string(:erlang.system_info(:system_architecture)) |> String.split("-") |> List.first(),
       runtime: "Elixir #{System.version()} / OTP #{System.otp_release()}",
-      state: Atom.to_string(state.tracker.state)
+      cpus: System.schedulers_online(),
+      memory_total_mb: div(:erlang.memory(:total), 1_024 * 1_024),
+      pid: System.pid() |> String.to_integer(),
+      uptime_seconds: Float.round(uptime_seconds, 1),
+      started_at: DateTime.to_iso8601(state.boot_time),
+      state: Tracker.map_state_string(state.tracker.state),
+      broker_address: state.broker
     }
 
     {:reply, info, state}
@@ -197,7 +288,8 @@ defmodule Burnin.Engine do
         config: config,
         workers: workers,
         timer_ref: timer_ref,
-        final_statuses: nil
+        final_statuses: nil,
+        last_report: nil
     }
 
     {:reply, {:ok, run_id}, new_state}
@@ -213,11 +305,21 @@ defmodule Burnin.Engine do
     statuses = collect_worker_statuses(state.workers)
     stop_workers(state.workers)
 
+    elapsed = Tracker.elapsed_seconds(state.tracker)
     verdict = Report.generate_verdict(statuses, state.config)
     tracker = Tracker.complete(state.tracker, verdict)
 
+    # Generate and store the full dashboard-compatible report
+    report = Report.generate_full_report(
+      statuses,
+      state.config,
+      elapsed,
+      tracker,
+      state.broker
+    )
+
     Logger.info("Run #{tracker.run_id} completed")
-    %{state | tracker: tracker, timer_ref: nil, final_statuses: statuses}
+    %{state | tracker: tracker, timer_ref: nil, final_statuses: statuses, last_report: report}
   end
 
   defp start_workers(broker, config) do
@@ -311,6 +413,43 @@ defmodule Burnin.Engine do
       end
     catch
       kind, reason -> {:error, "#{kind}: #{inspect(reason)}"}
+    end
+  end
+
+  defp ping_broker_with_details(address) do
+    try do
+      {:ok, client} =
+        KubeMQ.Client.start_link(address: address, client_id: "burnin-ping")
+
+      start_us = System.monotonic_time(:microsecond)
+      result = KubeMQ.Client.ping(client)
+      latency_us = System.monotonic_time(:microsecond) - start_us
+      KubeMQ.Client.close(client)
+
+      case result do
+        {:ok, info} ->
+          %{
+            connected: true,
+            address: address,
+            ping_latency_ms: Float.round(latency_us / 1_000, 2),
+            server_version: info.version,
+            last_ping_at: DateTime.utc_now() |> DateTime.to_iso8601()
+          }
+
+        {:error, err} ->
+          %{
+            connected: false,
+            address: address,
+            error: inspect(err)
+          }
+      end
+    catch
+      kind, reason ->
+        %{
+          connected: false,
+          address: address,
+          error: "#{kind}: #{inspect(reason)}"
+        }
     end
   end
 end

@@ -8,7 +8,11 @@ defmodule Burnin do
 
   @version "0.1.0"
   @sdk "kubemq-elixir"
+  @burnin_version "2.0.0"
+  @burnin_spec_version "2"
 
   def version, do: @version
   def sdk, do: @sdk
+  def burnin_version, do: @burnin_version
+  def burnin_spec_version, do: @burnin_spec_version
 end
