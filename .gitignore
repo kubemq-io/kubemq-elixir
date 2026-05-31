@@ -2,6 +2,10 @@
 /cover
 /deps
 /doc
+# Burn-in subproject build artifacts (root rules are anchored to repo root)
+/burnin/_build/
+/burnin/deps/
+/burnin/cover/
 /.fetch
 erl_crash.dump
 *.ez
