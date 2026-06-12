@@ -246,6 +246,42 @@ defmodule Burnin.Engine do
     end
   end
 
+  # Background setup finished while still :starting — adopt the workers,
+  # take ownership of their monitors, flip to :running and arm the timer.
+  def handle_info({:setup_complete, config, run_id, workers}, %{tracker: %{state: :starting}} = state) do
+    Enum.each(workers, fn {pid, _name} -> Process.monitor(pid) end)
+
+    tracker = Tracker.running(state.tracker)
+    duration_ms = Config.parse_duration(config.duration)
+
+    timer_ref =
+      if duration_ms > 0 do
+        Process.send_after(self(), :duration_elapsed, duration_ms)
+      end
+
+    Logger.info("Burn-in run #{run_id} reached running state with #{length(workers)} workers")
+
+    {:noreply, %{state | tracker: tracker, workers: workers, timer_ref: timer_ref}}
+  end
+
+  # Setup completed but the run was already stopped/cleaned up in the
+  # meantime — tear down the orphaned workers.
+  def handle_info({:setup_complete, _config, run_id, workers}, state) do
+    Logger.warning("Setup for #{run_id} completed but state is #{state.tracker.state}; stopping orphan workers")
+    stop_workers(workers)
+    {:noreply, state}
+  end
+
+  def handle_info({:setup_failed, run_id, reason}, %{tracker: %{state: :starting}} = state) do
+    Logger.error("Burn-in run #{run_id} setup failed: #{inspect(reason)}")
+    tracker = Tracker.fail(state.tracker, "setup failed: #{inspect(reason)}")
+    {:noreply, %{state | tracker: tracker, workers: []}}
+  end
+
+  def handle_info({:setup_failed, _run_id, _reason}, state) do
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     Logger.warning("Worker #{inspect(pid)} down: #{inspect(reason)}")
     {:noreply, state}
@@ -264,30 +300,39 @@ defmodule Burnin.Engine do
     broker = Config.effective_broker(config, state.broker)
     run_id = if config.run_id != "", do: config.run_id, else: "run-#{System.system_time(:millisecond)}"
 
+    # Fast broker reachability check kept synchronous so a bad broker still
+    # returns 400 to the HTTP caller immediately (mirrors Go/Rust).
     case ping_broker(broker) do
       {:ok, _} -> :ok
       {:error, reason} -> throw({:broker_error, reason})
     end
 
-    # Start workers first (opens connections in init), then start the timer
-    workers = start_workers(broker, config)
-    tracker = state.tracker |> Tracker.start(run_id) |> Tracker.running()
+    # Transition to :starting and reply immediately. The slow part —
+    # opening clients and creating ~56 channels per pattern — runs in a
+    # separate Task so the Engine mailbox stays free for run_status. When
+    # the Task finishes it sends {:setup_complete, ...} / {:setup_failed, ...}
+    # which flips the run to :running / :failed.
+    tracker = state.tracker |> Tracker.start(run_id)
+    engine = self()
 
-    duration_ms = Config.parse_duration(config.duration)
-
-    timer_ref =
-      if duration_ms > 0 do
-        Process.send_after(self(), :duration_elapsed, duration_ms)
+    Task.start(fn ->
+      try do
+        workers = start_workers(broker, config)
+        send(engine, {:setup_complete, config, run_id, workers})
+      catch
+        kind, reason ->
+          send(engine, {:setup_failed, run_id, {kind, reason}})
       end
+    end)
 
-    Logger.info("Started burn-in run #{run_id} targeting #{broker}")
+    Logger.info("Starting burn-in run #{run_id} targeting #{broker} (warming up in background)")
 
     new_state = %{
       state
       | tracker: tracker,
         config: config,
-        workers: workers,
-        timer_ref: timer_ref,
+        workers: [],
+        timer_ref: nil,
         final_statuses: nil,
         last_report: nil
     }
@@ -345,7 +390,9 @@ defmodule Burnin.Engine do
           queue_config: config.queue
         )
 
-      Process.monitor(pid)
+      # NOTE: monitoring is set up by the Engine in handle_info(:setup_complete),
+      # not here — start_workers runs inside a short-lived Task, so a monitor
+      # established here would be torn down when that Task exits.
       {pid, name}
     end
   end

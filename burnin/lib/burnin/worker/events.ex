@@ -51,7 +51,7 @@ defmodule Burnin.Worker.Events do
     senders_tuple = List.to_tuple(senders_list)
 
     {:ok, subscriber} = KubeMQ.Client.start_link(address: broker, client_id: "burnin-events-sub")
-    ensure_channels(hd(senders_list), channels)
+    ensure_channels(senders_list, channels)
 
     state = %__MODULE__{
       broker: broker,
@@ -153,14 +153,8 @@ defmodule Burnin.Worker.Events do
     {:noreply, state}
   end
 
-  defp ensure_channels(client, channels) do
-    Enum.each(channels, fn ch ->
-      try do
-        KubeMQ.Client.create_channel(client, ch, :events)
-      catch
-        _, _ -> :ok
-      end
-    end)
+  defp ensure_channels(clients, channels) do
+    Burnin.ChannelSetup.create_all(clients, channels, :events)
   end
 
   defp start_loops(subscriber, state) do

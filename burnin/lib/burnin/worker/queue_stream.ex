@@ -53,7 +53,7 @@ defmodule Burnin.Worker.QueueStream do
     senders_tuple = List.to_tuple(senders_list)
 
     {:ok, receiver} = KubeMQ.Client.start_link(address: broker, client_id: "burnin-queue-stream-recv")
-    ensure_channels(hd(senders_list), channels)
+    ensure_channels(senders_list, channels)
 
     state = %__MODULE__{
       broker: broker,
@@ -188,14 +188,8 @@ defmodule Burnin.Worker.QueueStream do
     receive_loop(client, poll_opts, channel, worker)
   end
 
-  defp ensure_channels(client, channels) do
-    Enum.each(channels, fn ch ->
-      try do
-        KubeMQ.Client.create_channel(client, ch, :queues)
-      catch
-        _, _ -> :ok
-      end
-    end)
+  defp ensure_channels(clients, channels) do
+    Burnin.ChannelSetup.create_all(clients, channels, :queues)
   end
 
   @min_tick_ms 10
