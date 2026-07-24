@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-07-24
+
+### Security
+- Update `protobuf` 0.16.0 → 0.17.0 — fixes CVE-2026-54451 (unbounded recursion when decoding embedded messages, DoS). Reachable on the inbound broker-message decode path.
+- Update `mint` 1.7.1 → 1.9.3 — fixes CVE-2026-48862 and CVE-2026-49754 (HTTP/2 memory-exhaustion DoS via the gRPC transport). Pulled transitively through `grpc`; `hpax` also updated 1.0.3 → 1.0.4.
+
 ## [1.0.1] - 2026-05-31
 
 ### Improvements
